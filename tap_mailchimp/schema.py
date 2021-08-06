@@ -47,7 +47,12 @@ def get_schemas():
         pk = PKS[stream_name]
         replication_keys = REPLICATION_KEYS.get(stream_name, [])
 
-        metadata = []
+        metadata = [{
+          "breadcrumb": [],
+          "metadata": {
+            "inclusion": "available"
+          }
+        }]
         for prop in schema['properties'].keys():
             if prop in pk or prop in replication_keys:
                 inclusion = 'automatic'
