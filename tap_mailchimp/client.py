@@ -34,7 +34,7 @@ class MailchimpClient:
     def get_base_url(self):
         data = self.request('GET',
                             url='https://login.mailchimp.com/oauth2/metadata',
-                            endpoint='base_url')
+                            endpoint='base_url')   
         self.__base_url = data['api_endpoint']
 
     @backoff.on_exception(backoff.expo,
@@ -74,6 +74,9 @@ class MailchimpClient:
         with metrics.http_request_timer(endpoint) as timer:
             LOGGER.info("Executing %s request to %s with params: %s", method, url, kwargs.get('params'))
             response = self.__session.request(method, url, **kwargs)
+            if response.json().get("error"):
+                LOGGER.error("Error in response: %s", response.json().get("error"))
+                raise Exception(response.json().get("error"))
             timer.tags[metrics.Tag.http_status_code] = response.status_code
 
         if response.status_code >= 500:
