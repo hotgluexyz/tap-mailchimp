@@ -34,7 +34,7 @@ class MailchimpClient:
     def get_base_url(self):
         data = self.request('GET',
                             url='https://login.mailchimp.com/oauth2/metadata',
-                            endpoint='base_url')  
+                            endpoint='base_url')
         self.__base_url = data['api_endpoint']
 
     @backoff.on_exception(backoff.expo,
