@@ -74,9 +74,10 @@ class MailchimpClient:
         with metrics.http_request_timer(endpoint) as timer:
             LOGGER.info("Executing %s request to %s with params: %s", method, url, kwargs.get('params'))
             response = self.__session.request(method, url, **kwargs)
-            try:
-                if not response.text:
+            
+            if not response.text:
                     raise Exception(f"Error in reques to url {response.url} with status code {response.status_code} and empty response")
+            try:
                 if response.json().get("error"):
                     LOGGER.error("Error in response: %s", response.json().get("error"))
                     raise Exception(response.json().get("error"))
