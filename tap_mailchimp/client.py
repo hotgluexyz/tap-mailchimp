@@ -84,9 +84,9 @@ class MailchimpClient:
             try:
                 if response.json().get("error"):
                     LOGGER.error("Error in response: %s", response.json().get("error"))
-                    raise InvalidResponseError(f'Error: {response.json().get("error")} , status code {response.status_code}')
+                    raise Exception(f'Error: {response.json().get("error")} , status code {response.status_code}')
             except:
-                raise Exception(f"Error in request to url {response.url} with status code {response.status_code}")
+                raise InvalidResponseError(f"Error in request to url {response.url} with status code {response.status_code} and response = {response.text}")
             timer.tags[metrics.Tag.http_status_code] = response.status_code
 
         if response.status_code >= 500:
