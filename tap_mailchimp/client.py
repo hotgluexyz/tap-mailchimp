@@ -12,6 +12,10 @@ class ClientRateLimitError(Exception):
 class Server5xxError(Exception):
     pass
 
+class InvalidResponseError(Exception):
+    pass
+
+
 class MailchimpClient:
     def __init__(self, config):
         self.__user_agent = config.get('user_agent')
@@ -38,7 +42,7 @@ class MailchimpClient:
         self.__base_url = data['api_endpoint']
 
     @backoff.on_exception(backoff.expo,
-                          (Server5xxError, ClientRateLimitError, ConnectionError),
+                          (Server5xxError, ClientRateLimitError, ConnectionError, InvalidResponseError),
                           max_tries=6,
                           factor=3)
     def request(self, method, path=None, url=None, s3=False, **kwargs):
@@ -76,11 +80,11 @@ class MailchimpClient:
             response = self.__session.request(method, url, **kwargs)
 
             if not response.text:
-                raise Exception(f"Error in request to url {response.url} with status code {response.status_code} and empty response")
+                raise InvalidResponseError(f"Error in request to url {response.url} with status code {response.status_code} and empty response")
             try:
                 if response.json().get("error"):
                     LOGGER.error("Error in response: %s", response.json().get("error"))
-                    raise Exception(f'Error: {response.json().get("error")} , status code {response.status_code}')
+                    raise InvalidResponseError(f'Error: {response.json().get("error")} , status code {response.status_code}')
             except:
                 raise Exception(f"Error in request to url {response.url} with status code {response.status_code}")
             timer.tags[metrics.Tag.http_status_code] = response.status_code
