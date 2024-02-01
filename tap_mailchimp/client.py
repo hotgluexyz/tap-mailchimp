@@ -76,13 +76,13 @@ class MailchimpClient:
             response = self.__session.request(method, url, **kwargs)
 
             if not response.text:
-                    raise Exception(f"Error in reques to url {response.url} with status code {response.status_code} and empty response")
+                raise Exception(f"Error in request to url {response.url} with status code {response.status_code} and empty response")
             try:
                 if response.json().get("error"):
                     LOGGER.error("Error in response: %s", response.json().get("error"))
                     raise Exception(f'Error: {response.json().get("error")} , status code {response.status_code}')
             except:
-                raise Exception(f"Error: {response.text} , status code: {response.status_code}")
+                raise Exception(f"Error in request to url {response.url} with status code {response.status_code}")
             timer.tags[metrics.Tag.http_status_code] = response.status_code
 
         if response.status_code >= 500:
