@@ -74,7 +74,7 @@ class MailchimpClient:
         with metrics.http_request_timer(endpoint) as timer:
             LOGGER.info("Executing %s request to %s with params: %s", method, url, kwargs.get('params'))
             response = self.__session.request(method, url, **kwargs)
-            if response.json().get("error"):
+            if not s3 and response.json().get("error"):
                 LOGGER.error("Error in response: %s", response.json().get("error"))
                 raise Exception(response.json().get("error"))
             timer.tags[metrics.Tag.http_status_code] = response.status_code
