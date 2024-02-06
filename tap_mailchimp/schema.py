@@ -22,6 +22,10 @@ PKS = {
 
 REPLICATION_KEYS = {
     'list_members': ['last_changed'],
+    'list_segment_members': ['last_changed'],
+    'lists': ['campaign_last_sent'],
+    'reports_email_activity': ['timestamp'],
+    'list_segments': ['updated_at']
 }
 
 def get_abs_path(path):
