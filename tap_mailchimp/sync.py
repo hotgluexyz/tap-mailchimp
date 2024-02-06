@@ -41,8 +41,6 @@ def process_records(catalog,
     stream_metadata = metadata.to_map(stream.metadata)
     with metrics.record_counter(stream_name) as counter, Transformer() as transformer:
         for record in records:
-            if stream_name == "lists" and "stats" in record:
-                record['campaign_last_sent'] = record.get("stats", {}).get("campaign_last_sent")
             if bookmark_field:
                 if max_bookmark_field is None or \
                    record[bookmark_field] > max_bookmark_field:
@@ -470,8 +468,6 @@ def sync(client, catalog, state, start_date):
     endpoints = {
         'lists': {
             'path': '/lists',
-            'bookmark_field': 'campaign_last_sent',
-            'bookmark_query_field': 'since_campaign_last_sent',
             'params': {
                 'sort_field': 'date_created',
                 'sort_dir': 'ASC'
