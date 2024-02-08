@@ -278,8 +278,11 @@ def stream_email_activity(client, catalog, state, archive_url):
             file = tar.next()
             while file:
                 if file.isfile():
-                    rawoperations = tar.extractfile(file)
-                    operations = json.loads(rawoperations.read().decode('utf-8'))
+                    try:
+                        rawoperations = tar.extractfile(file)
+                        operations = json.loads(rawoperations.read().decode('utf-8'))
+                    except tarfile.ReadError:
+                        failed_campaign_ids.append(campaign_id)
                     for i, operation in enumerate(operations):
                         campaign_id = operation['operation_id']
                         last_bookmark = state.get('bookmarks', {}).get(stream_name, {}).get(campaign_id)
