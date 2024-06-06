@@ -54,7 +54,7 @@ def get_schemas():
           }
         }]
         for prop in schema['properties'].keys():
-            if prop in pk or prop in replication_keys:
+            if prop in pk or prop in replication_keys or prop == "merge_fields":
                 inclusion = 'automatic'
             else:
                 inclusion = 'available'

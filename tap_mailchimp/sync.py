@@ -92,6 +92,11 @@ def sync_endpoint(client,
         _id = record.get('id')
         if _id:
             ids.append(_id)
+        merge_fields = record.get('merge_fields')
+        if merge_fields:
+            for key, value in merge_fields.items():
+                record[key] = value
+            record.pop("merge_fields", None)
         del record['_links']
         return record
 
