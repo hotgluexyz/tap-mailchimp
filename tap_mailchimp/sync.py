@@ -8,6 +8,8 @@ from singer import metrics, metadata, Transformer
 from singer.utils import strptime_to_utc, should_sync_field
 from requests.exceptions import HTTPError
 
+from tap_mailchimp.discover import get_merge_fields
+
 LOGGER = singer.get_logger()
 
 MIN_RETRY_INTERVAL = 2 # 2 seconds
@@ -135,6 +137,13 @@ def sync_endpoint(client,
 
         if len(raw_records) < page_size:
             has_more = False
+
+        merge_fields = {}
+        if stream_name in ["list_members", "list_segments", "list_segment_members"]:
+            get_merge_fields(client, merge_fields, [{"id":id_value} for id_value in set([raw_record["list_id"] for raw_record in raw_records])],value_as_type=False)
+            for merge_field in merge_fields.values():
+                for raw_record in raw_records:
+                    raw_record[merge_field["tag"]] = merge_field["value"]
 
         max_bookmark_field = process_records(catalog,
                                              stream_name,
@@ -544,3 +553,5 @@ def sync(client, catalog, state, start_date):
 
         # Start from the beginning next time
         write_bookmark(state, ['reports_email_activity_next_chunk'], 0)
+
+
