@@ -72,7 +72,7 @@ def get_merge_fields(client, merge_fields, lists, value_as_type=True):
         if list_merge_fields:
             [list_merge_field.pop("_links", None) for list_merge_field in list_merge_fields]
             merge_fields.update({
-                merge_field["tag"]: "string" if value_as_type else extract_merge_fields(merge_field)
+                "merge_fields."+merge_field["tag"]: "string" if value_as_type else extract_merge_fields(merge_field)
                 for merge_field in list_merge_fields
             })
             

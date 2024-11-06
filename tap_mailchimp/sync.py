@@ -97,7 +97,7 @@ def sync_endpoint(client,
         merge_fields = record.get('merge_fields')
         if merge_fields:
             for key, value in merge_fields.items():
-                record[key] = value
+                record["merge_fields."+key] = json.dumps(value)
             record.pop("merge_fields", None)
         del record['_links']
         return record
@@ -143,7 +143,7 @@ def sync_endpoint(client,
             get_merge_fields(client, merge_fields, [{"id":id_value} for id_value in set([raw_record["list_id"] for raw_record in raw_records])],value_as_type=False)
             for merge_field in merge_fields.values():
                 for raw_record in raw_records:
-                    raw_record[merge_field["tag"]] = merge_field["value"]
+                    raw_record["merge_fields."+merge_field["tag"]] = json.dumps(merge_field["value"])
 
         max_bookmark_field = process_records(catalog,
                                              stream_name,
