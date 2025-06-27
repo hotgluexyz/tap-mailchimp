@@ -249,7 +249,7 @@ def poll_email_activity(client, state, batch_id):
             return data
         elif (time.time() - start_time) > MAX_RETRY_ELAPSED_TIME:
             message = 'Mailchimp campaigns export is still in progress after {} seconds. Will continue with this export on the next sync.'.format(MAX_RETRY_ELAPSED_TIME)
-            LOGGER.error(message)
+            LOGGER.warning(message)
             return None
 
         sleep = next_sleep_interval(sleep)
@@ -346,7 +346,7 @@ def sync_email_activity(client, catalog, state, start_date, campaign_ids, batch_
 
     # If polling timed out, data will be None and we should skip processing
     if data is None:
-        LOGGER.error('reports_email_activity - Batch job timed out, will resume on next sync')
+        LOGGER.warning('reports_email_activity - Batch job timed out, will resume on next sync')
         return
 
     LOGGER.info('reports_email_activity - Batch job complete: took %.2fs minutes',
