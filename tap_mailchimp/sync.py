@@ -246,16 +246,16 @@ def poll_email_activity(client, state, batch_id):
                     progress)
 
         LOGGER.info('reports_email_activity - Operations: total_operations: %s, finished_operations: %s, errored_operations: %s',
-                    data['total_operations'],
-                    data['finished_operations'],
-                    data['errored_operations'])
+                data['total_operations'],
+                data['finished_operations'],
+                data['errored_operations'])
 
         if data['status'] == 'finished':
             return data
         elif (time.time() - start_time) > MAX_RETRY_ELAPSED_TIME:
             message = 'Mailchimp campaigns export is still in progress after {} seconds. Will continue with this export on the next sync.'.format(MAX_RETRY_ELAPSED_TIME)
-            LOGGER.warning(message)
-            return None
+            LOGGER.error(message)
+            raise Exception(message)
 
         sleep = next_sleep_interval(sleep)
         LOGGER.info('campaigns - status: %s, sleeping for %s seconds',
@@ -348,11 +348,6 @@ def sync_email_activity(client, catalog, state, start_date, campaign_ids, batch_
         write_activity_batch_bookmark(state, batch_id)
 
     data = poll_email_activity(client, state, batch_id)
-
-    # If polling timed out, data will be None and we should skip processing
-    if data is None:
-        LOGGER.warning('reports_email_activity - Batch job timed out, will resume on next sync')
-        return None
 
     LOGGER.info('reports_email_activity - Batch job complete: took %.2fs minutes',
                 (strptime_to_utc(data['completed_at']) - strptime_to_utc(data['submitted_at'])).total_seconds() / 60)
@@ -550,8 +545,7 @@ def sync(client, catalog, state, start_date):
         chunk_bookmark = int(get_bookmark(state, ['reports_email_activity_next_chunk'], 0))
         for i, campaign_chunk in enumerate(chunk_campaigns(sorted_campaigns, chunk_bookmark)):
             write_email_activity_chunk_bookmark(state, chunk_bookmark, i, sorted_campaigns)
-            if not sync_email_activity(client, catalog, state, start_date, campaign_chunk):
-                return
+            sync_email_activity(client, catalog, state, start_date, campaign_chunk)
 
         # Start from the beginning next time
         write_bookmark(state, ['reports_email_activity_next_chunk'], 0)
