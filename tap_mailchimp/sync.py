@@ -537,7 +537,8 @@ def sync(client, catalog, state, start_date):
         check_and_resume_email_activity_batch(client, catalog, state, start_date)
         # Chunk batch_ids, bookmarking the chunk number
         sorted_campaigns = sorted(campaign_ids)
-        chunk_bookmark = int(get_bookmark(state, ['reports_email_activity_next_chunk'], 0))
+        next_chunk = get_bookmark(state, ['reports_email_activity_next_chunk'], 0) or 0
+        chunk_bookmark = int(next_chunk)
         for i, campaign_chunk in enumerate(chunk_campaigns(sorted_campaigns, chunk_bookmark)):
             write_email_activity_chunk_bookmark(state, chunk_bookmark, i, sorted_campaigns)
             sync_email_activity(client, catalog, state, start_date, campaign_chunk)
