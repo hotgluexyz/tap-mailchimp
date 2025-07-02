@@ -31,8 +31,6 @@
         "string"
       ]
     },
-    "merge_fields": {
-    },
     "stats": {
       "type": [
         "null",
@@ -82,7 +80,7 @@
     "member_rating": {
       "type": [
         "null",
-        "number"
+        "integer"
       ]
     },
     "last_changed": {

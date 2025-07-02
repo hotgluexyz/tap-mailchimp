@@ -31,20 +31,12 @@ def discover(client):
     # fetch merge fields for lists endpoints
     merge_fields = {}
     lists = client.get("/lists", params={"count": 1000}).get("lists")
-    for list in lists:
-        list_merge_fields = client.get(
-            f'/lists/{list["id"]}/merge-fields', params={"count": 1000}
-        ).get("merge_fields")
-        if list_merge_fields:
-            list_merge_fields = {
-                merge_field["tag"]: merge_field["type"]
-                for merge_field in list_merge_fields
-            }
-            merge_fields.update(list_merge_fields)
+    get_merge_fields(client, merge_fields, lists)
 
     for stream_name, schema_dict in schemas.items():
         # add merge fields for lists streams
-        if stream_name in ["list_members", "list_segment_members"]:
+        schema_dict["properties"].pop("merge_fields", None)
+        if stream_name in ["list_segments", "list_members", "list_segment_members"]:
             for merge_field in merge_fields:
                 schema_dict["properties"].update(
                     {merge_field: get_type(merge_fields[merge_field])}
@@ -71,3 +63,49 @@ def discover(client):
         )
 
     return catalog
+
+def get_merge_fields(client, merge_fields, lists, value_as_type=True):
+    for mailchimp_list in lists:
+        list_merge_fields = client.get(
+            f'/lists/{mailchimp_list["id"]}/merge-fields', params={"count": 1000}
+        ).get("merge_fields")
+        if list_merge_fields:
+            [list_merge_field.pop("_links", None) for list_merge_field in list_merge_fields]
+            merge_fields.update({
+                "merge_fields."+merge_field["tag"]: "string" if value_as_type else extract_merge_fields(merge_field)
+                for merge_field in list_merge_fields
+            })
+            
+def extract_merge_fields(merge_field):
+    extracted_merge_field = {
+        "tag": merge_field["tag"],
+        "value": flatten_dict(merge_field)
+    }
+
+    return extracted_merge_field
+
+def flatten_dict(d, parent_key='', sep='.'):
+    """
+    Flattens a nested dictionary, concatenating keys with a separator.
+    Handles lists by including the index in the key.
+    """
+    def flatten_item(parent_key, key, value, sep):
+        new_key = f"{parent_key}{sep}{key}" if parent_key else key
+        if isinstance(value, dict):
+            return flatten_dict(value, new_key, sep=sep).items()
+        elif isinstance(value, list):
+            items = []
+            for i, item in enumerate(value):
+                list_key = f"{new_key}{sep}{i}"
+                if isinstance(item, (dict, list)):
+                    items.extend(flatten_item(new_key, str(i), item, sep))
+                else:
+                    items.append((list_key, item))
+            return items
+        else:
+            return [(new_key, value)]
+
+    items = []
+    for k, v in d.items():
+        items.extend(flatten_item(parent_key, k, v, sep))
+    return dict(items)
