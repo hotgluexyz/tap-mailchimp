@@ -2,7 +2,7 @@
 import requests
 from typing import Any, Dict, Iterable, Optional
 from singer_sdk import typing as th
-from tap_mailchimp_v2.client import MailchimpStream
+from tap_mailchimp.client import MailchimpStream
 
 class AutomationsStream(MailchimpStream):
     """Automations stream."""

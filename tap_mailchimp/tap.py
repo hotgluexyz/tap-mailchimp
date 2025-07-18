@@ -4,18 +4,13 @@ from typing import List
 
 from singer_sdk import Tap, Stream
 from singer_sdk.typing import (
-    ArrayType,
-    BooleanType,
-    DateTimeType,
     IntegerType,
-    NumberType,
-    ObjectType,
     PropertiesList,
     Property,
     StringType,
 )
 
-from tap_mailchimp_v2.streams import (
+from tap_mailchimp.streams import (
     AutomationsStream,
     CampaignsStream,
     ListMembersStream,
@@ -24,7 +19,7 @@ from tap_mailchimp_v2.streams import (
     ListsStream,
     UnsubscribesStream,
 )
-from tap_mailchimp_v2.batch_streams import EmailActivityBatchStream
+# from tap_mailchimp.batch_streams import EmailActivityBatchStream
 
 STREAM_TYPES = [
   AutomationsStream,
@@ -34,7 +29,7 @@ STREAM_TYPES = [
   ListSegmentsStream,
   ListsStream,
   UnsubscribesStream,
-  EmailActivityBatchStream
+  # EmailActivityBatchStream
 ]
 
 class TapMailchimp(Tap):

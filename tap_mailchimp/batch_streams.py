@@ -1,4 +1,4 @@
-"""Batch streams for complex Mailchimp operations."""
+"""Unused for now: Batch streams for complex Mailchimp operations."""
 
 import json
 import time
@@ -9,9 +9,8 @@ import requests
 import io
 from typing import Iterable, Optional
 from singer_sdk import typing as th
-from tap_mailchimp_v2.client import ClientRateLimitError, MailchimpStream, Server5xxError
-from tap_mailchimp_v2.streams import CampaignsStream
-from singer import metrics, Transformer
+from tap_mailchimp.client import ClientRateLimitError, MailchimpStream, Server5xxError
+from singer import metrics
 import singer
 
 LOGGER = singer.get_logger()
@@ -113,6 +112,7 @@ class EmailActivityBatchStream(MailchimpStream):
     primary_keys = ["campaign_id", "action", "email_id", "timestamp"]
     replication_key = "timestamp"
     records_jsonpath = "$.emails[*]"
+    # parent_stream_type = CampaignsStream
 
     schema = th.PropertiesList(
         th.Property("campaign_id", th.StringType),
@@ -123,6 +123,10 @@ class EmailActivityBatchStream(MailchimpStream):
         th.Property("ip", th.StringType),
         th.Property("user_agent", th.StringType),
         th.Property("location", th.ObjectType()),
+        th.Property("list_id", th.StringType),
+        th.Property("list_is_active", th.BooleanType),
+        th.Property("email_address", th.StringType),
+        th.Property("type", th.StringType),
         th.Property("_links", th.ArrayType(th.ObjectType())),
     ).to_dict()
 
@@ -135,10 +139,7 @@ class EmailActivityBatchStream(MailchimpStream):
         self.max_retry_interval = 300
 
     def get_campaign_ids(self) -> list:
-        """Get campaign IDs from the campaigns stream."""
-        from tap_mailchimp_v2.streams import CampaignsStream
-        
-        # campaigns_stream = CampaignsStream(tap=self.tap)
+        """Get campaign IDs from the campaigns stream."""        
         campaign_ids = []
         
         # Get all campaigns that are sent
@@ -149,7 +150,7 @@ class EmailActivityBatchStream(MailchimpStream):
             "count": 100,
         }
         
-        response = self.requests_session.get(
+        response = requests.get(
             f"{self.url_base}/campaigns",
             params=params,
             headers=self.http_headers,
@@ -168,7 +169,10 @@ class EmailActivityBatchStream(MailchimpStream):
         """Create batch operations for email activity."""
         operations = []
         
-        for campaign_id in campaign_ids[5:10]:
+        # Get selected fields from schema
+        selected_fields = self._get_selected_fields()
+        
+        for campaign_id in ["000fa74aa0"]:
             since = self.get_starting_replication_key_value({"campaign_id": campaign_id}) or since_date
             operations.append({
                 "method": "GET",
@@ -176,15 +180,27 @@ class EmailActivityBatchStream(MailchimpStream):
                 "operation_id": campaign_id,
                 "params": {
                     "since": since,
-                    "fields": "emails.activity,emails.email_id,emails.campaign_id"
+                    "fields": selected_fields
                 }
             })
         
         return operations
 
+    def _get_selected_fields(self) -> str:
+        """Get selected fields from schema for API request."""
+        # For now, return a comprehensive set of fields
+        # This can be enhanced later to read from catalog metadata
+        # 
+        # Future enhancement: Read from self.tap.catalog if available
+        # Example:
+        # if hasattr(self, 'tap') and self.tap and hasattr(self.tap, 'catalog'):
+        #     # Read selected fields from catalog metadata
+        #     # This would require proper singer_sdk catalog access
+        return "emails.activity,emails.email_id,emails.campaign_id,emails.list_id,emails.list_is_active,emails.email_address,emails.type"
+
     def create_batch(self, operations: list) -> str:
         """Create a batch job."""
-        response = self.requests_session.post(
+        response = requests.post(
             f"{self.url_base}/batches",
             json={"operations": operations},
             headers=self.http_headers,
@@ -196,7 +212,7 @@ class EmailActivityBatchStream(MailchimpStream):
     def get_batch_info(self, batch_id: str) -> dict:
         """Get batch job information."""
         try:
-            response = self.requests_session.get(
+            response = requests.get(
                 f"{self.url_base}/batches/{batch_id}",
                 headers=self.http_headers,
             )
@@ -240,55 +256,32 @@ class EmailActivityBatchStream(MailchimpStream):
         max_interval = previous_sleep_interval * 2 or self.min_retry_interval
         return min(self.max_retry_interval, random.randint(min_interval, max_interval))
 
-    def process_records(catalog,
-                    stream_name,
-                    records,
-                    persist=True,
-                    bookmark_field=None,
-                    max_bookmark_field=None):
-        stream = catalog.get_stream(stream_name)
-        schema = stream.schema.to_dict()
-        stream_metadata = singer.metadata.to_map(stream.metadata)
-        with metrics.record_counter(stream_name) as counter, Transformer() as transformer:
-            for record in records:
-                if bookmark_field:
-                    if max_bookmark_field is None or \
-                    record[bookmark_field] > max_bookmark_field:
-                        max_bookmark_field = record[bookmark_field]
-                if persist:
-                    record = transformer.transform(record,
-                                                schema,
-                                                stream_metadata)
-                    singer.write_record(stream_name, record)
-                    counter.increment()
-            return max_bookmark_field
-
     def stream_activity_from_archive(self, archive_url: str) -> Iterable[dict]:
         """Stream activity records from archive URL."""
-        # failed_campaign_ids = []
         
         def transform_activities(records):
+            """Transform activity records to the expected format."""
             for record in records:
                 if 'activity' in record:
+                    # Remove _links as it's not needed in the output
                     if '_links' in record:
                         del record['_links']
+                    
+                    # Create base record template
                     record_template = dict(record)
                     del record_template['activity']
-
+                    
+                    # Process each activity
                     for activity in record['activity']:
                         new_activity = dict(record_template)
+                        # Merge activity fields into the record
                         for key, value in activity.items():
                             new_activity[key] = value
                         yield new_activity
 
-        # singer.write_schema(self._singer_catalog, self.name)
-        
-        # response = self.requests_session.get(archive_url, stream=True)
-        # response.raise_for_status()
-
         failed_campaign_ids = []
-        client = MailchimpClient(self.config)
-        with client.request('GET', url=archive_url, s3=True, endpoint='s3') as response:
+
+        with requests.get(archive_url, stream=True) as response:
             with tarfile.open(mode='r|gz', fileobj=response.raw) as tar:
                 file = tar.next()
                 while file:
@@ -299,21 +292,16 @@ class EmailActivityBatchStream(MailchimpStream):
                             campaign_id = operation['operation_id']
                             last_bookmark = self.get_starting_replication_key_value({"campaign_id": campaign_id})
                             LOGGER.info("reports_email_activity - [batch operation %s] Processing records for campaign %s", i, campaign_id)
+                            
                             if operation['status_code'] != 200:
                                 failed_campaign_ids.append(campaign_id)
                             else:
                                 response = json.loads(operation['response'])
                                 email_activities = response['emails']
-                                transform_activities(email_activities)
-                                # max_bookmark_field = self.process_records(
-                                #     self.catalog,
-                                #     self.name,
-                                #     transform_activities(email_activities),
-                                #     bookmark_field='timestamp',
-                                #     max_bookmark_field=last_bookmark)
-                                # self.write_bookmark(self.state,
-                                #             [self.name, campaign_id],
-                                #             max_bookmark_field)
+                                
+                                # Process transformed activities
+                                for transformed_record in transform_activities(email_activities):
+                                    yield transformed_record
                     file = tar.next()
 
         if failed_campaign_ids:
