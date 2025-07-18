@@ -106,13 +106,6 @@ class CampaignsStream(MailchimpStream):
             return None
         return (previous_token or 0) + len(campaigns)
 
-    # def parse_response(self, response: requests.Response) -> Iterable[dict]:
-    #     """Parse response."""
-    #     data = response.json()
-    #     campaigns = data.get("campaigns", [])
-    #     for campaign in campaigns:
-    #         yield campaign
-    
     def get_child_context(self, record: dict, context: Optional[dict]) -> dict:
         """Get child context."""
         return {"campaign_id": record["id"]}
@@ -124,6 +117,8 @@ class ListsStream(MailchimpStream):
     path = "/lists"
     primary_keys = ["id"]
     replication_key = None
+    records_jsonpath = "$.lists[*]"
+
     schema = th.PropertiesList(
         th.Property("id", th.StringType),
         th.Property("web_id", th.IntegerType),
@@ -160,23 +155,6 @@ class ListsStream(MailchimpStream):
         if next_page_token:
             params["offset"] = next_page_token
         return params
-
-    # def get_next_page_token(
-    #     self, response: requests.Response, previous_token: Optional[Any]
-    # ) -> Optional[Any]:
-    #     """Get next page token."""
-    #     data = response.json()
-    #     lists = data.get("lists", [])
-    #     if len(lists) < self.config.get("page_size", 1000):
-    #         return None
-    #     return (previous_token or 0) + len(lists)
-
-    def parse_response(self, response: requests.Response) -> Iterable[dict]:
-        """Parse response."""
-        data = response.json()
-        lists = data.get("lists", [])
-        for list_item in lists:
-            yield list_item
 
     def get_child_context(self, record: dict, context: Optional[dict]) -> dict:
         """Get child context."""
@@ -250,22 +228,21 @@ class ListMembersStream(MailchimpStream):
         if len(members) < self.config.get("page_size", 1000):
             return None
         return (previous_token or 0) + len(members)
-
-    # def transform_record(self, record: dict) -> dict:
-    #     """Transform record."""
-    #     # Add list_id to record
-    #     if "list_id" not in record:
-    #         record["list_id"] = self.context.get("list_id")
+    
+    def post_process(self, row: dict, context: Optional[dict] = None) -> Optional[dict]:
+        """Post process records."""
+        # Add list_id to record
+        if "list_id" not in row:
+            row["list_id"] = self.context.get("list_id")
         
-    #     # Flatten merge_fields
-    #     merge_fields = record.get("merge_fields")
-    #     if merge_fields:
-    #         for key, value in merge_fields.items():
-    #             record[key] = value
-    #         record.pop("merge_fields", None)
+        # Flatten merge_fields
+        merge_fields = row.get("merge_fields")
+        if merge_fields:
+            for key, value in merge_fields.items():
+                row[key] = value
+            row.pop("merge_fields", None)
         
-    #     return record
-
+        return row
 
 class ListSegmentsStream(MailchimpStream):
     """List segments stream."""
@@ -311,12 +288,12 @@ class ListSegmentsStream(MailchimpStream):
             return None
         return (previous_token or 0) + len(segments)
 
-    # def transform_record(self, record: dict) -> dict:
-    #     """Transform record."""
-    #     # Add list_id to record
-    #     if "list_id" not in record:
-    #         record["list_id"] = self.context.get("list_id")
-    #     return record
+    def post_process(self, record: dict, context: Optional[dict] = None) -> Optional[dict]:
+        """Post process record."""
+        # Add list_id to record
+        if "list_id" not in record:
+            record["list_id"] = self.context.get("list_id")
+        return record
 
     def parse_response(self, response: requests.Response) -> Iterable[dict]:
         """Parse response."""
@@ -393,15 +370,15 @@ class ListSegmentMembersStream(MailchimpStream):
             return None
         return (previous_token or 0) + len(members)
 
-    # def transform_record(self, record: dict) -> dict:
-    #     """Transform record."""
-    #     # Flatten merge_fields
-    #     merge_fields = record.get("merge_fields")
-    #     if merge_fields:
-    #         for key, value in merge_fields.items():
-    #             record[key] = value
-    #         record.pop("merge_fields", None)
-    #     return record
+    def post_process(self, record: dict, context: Optional[dict] = None) -> Optional[dict]:
+        """Post process record."""
+        # Flatten merge_fields
+        merge_fields = record.get("merge_fields")
+        if merge_fields:
+            for key, value in merge_fields.items():
+                record[key] = value
+            record.pop("merge_fields", None)
+        return record
 
 
 class UnsubscribesStream(MailchimpStream):
@@ -450,17 +427,17 @@ class UnsubscribesStream(MailchimpStream):
             return None
         return (previous_token or 0) + len(unsubscribes)
 
-    # def transform_record(self, record: dict) -> dict:
-    #     """Transform record."""
-    #     # Add campaign_id to record
-    #     if "campaign_id" not in record:
-    #         record["campaign_id"] = self.context.get("campaign_id")
+    def post_process(self, record: dict, context: Optional[dict] = None) -> Optional[dict]:
+        """Post process record."""
+        # Add campaign_id to record
+        if "campaign_id" not in record:
+            record["campaign_id"] = self.context.get("campaign_id")
         
-    #     # Flatten merge_fields
-    #     merge_fields = record.get("merge_fields")
-    #     if merge_fields:
-    #         for key, value in merge_fields.items():
-    #             record[key] = value
-    #         record.pop("merge_fields", None)
+        # Flatten merge_fields
+        merge_fields = record.get("merge_fields")
+        if merge_fields:
+            for key, value in merge_fields.items():
+                record[key] = value
+            record.pop("merge_fields", None)
         
-    #     return record
+        return record
