@@ -1,99 +1,97 @@
-import backoff
-import requests
-import singer
-from requests.exceptions import ConnectionError # pylint: disable=redefined-builtin
-from singer import metrics
+"""Mailchimp API client."""
 
-LOGGER = singer.get_logger()
+import copy
+from typing import Any, Optional
+import requests
+from singer_sdk.authenticators import BearerTokenAuthenticator, BasicAuthenticator
+from singer_sdk.streams import RESTStream
+from backports.cached_property import cached_property
+
 
 class ClientRateLimitError(Exception):
-    pass
+    """Rate limit error."""
 
 class Server5xxError(Exception):
-    pass
+    """Server 5xx error."""
 
-class MailchimpClient:
-    def __init__(self, config):
-        self.__user_agent = config.get('user_agent')
-        self.__access_token = config.get('access_token')
-        self.__api_key = config.get('api_key')
-        self.__session = requests.Session()
-        self.__base_url = None
-        self.page_size = int(config.get('page_size', '1000'))
+class MailchimpStream(RESTStream):
+    """Base class for Mailchimp streams."""
 
-        if not self.__access_token and self.__api_key:
-            self.__base_url = 'https://{}.api.mailchimp.com'.format(
-                config.get('dc'))
+    @cached_property
+    def url_base(self) -> str:
+        if self.config.get("access_token"):
+            # For OAuth, we need to get the base URL from the metadata endpoint
+            metadata_response = requests.get(
+                "https://login.mailchimp.com/oauth2/metadata",
+                headers=self.http_headers
+            )
+            metadata_response.raise_for_status()
+            metadata = metadata_response.json()
+            return metadata["api_endpoint"] + '/3.0'
 
-    def __enter__(self):
-        return self
+        # For API key, use the data center
+        dc = self.config["dc"]
+        return f"https://{dc}.api.mailchimp.com/{3.0}"
 
-    def __exit__(self, type, value, traceback): # pylint: disable=redefined-builtin
-        self.__session.close()
-
-    def get_base_url(self):
-        data = self.request('GET',
-                            url='https://login.mailchimp.com/oauth2/metadata',
-                            endpoint='base_url')
-        self.__base_url = data['api_endpoint']
-
-    @backoff.on_exception(backoff.expo,
-                          (Server5xxError, ClientRateLimitError, ConnectionError),
-                          max_tries=6,
-                          factor=3)
-    def request(self, method, path=None, url=None, s3=False, **kwargs):
-        if url is None and self.__base_url is None:
-            self.get_base_url()
-
-        if url is None and path:
-            url = self.__base_url + '/3.0' + path
-
-        if 'endpoint' in kwargs:
-            endpoint = kwargs['endpoint']
-            del kwargs['endpoint']
+    def get_authenticator(self):
+        """Get the authenticator."""
+        if self.config.get("access_token"):
+            return BearerTokenAuthenticator.create_for_stream(
+                self, token='OAuth {}'.format(self.config.get("access_token"))
+            )
+        elif self.config.get("api_key"):
+            return BasicAuthenticator.create_for_stream(
+                self, username="", password=self.config["api_key"]
+            )
         else:
-            endpoint = None
+            raise Exception("`access_token` or `api_key` required")
 
-        if 'headers' not in kwargs:
-            kwargs['headers'] = {}
+    @property
+    def http_headers(self) -> dict:
+        """Return the http headers needed."""
+        headers = {}
+        if "user_agent" in self.config:
+            headers["User-Agent"] = self.config["user_agent"]
+        if self.config.get("access_token"):
+            headers["Authorization"] = f"OAuth {self.config.get('access_token')}"
+        elif self.config.get("api_key"):
+            headers["auth"] = ("", self.config.get("api_key"))
+        return headers
 
-        if not s3:
-            if self.__access_token:
-                kwargs['headers']['Authorization'] = 'OAuth {}'.format(self.__access_token)
-            elif self.__api_key:
-                kwargs['auth'] = ('', self.__api_key)
-            else:
-                raise Exception('`access_token` or `api_key` required')
+    def get_url_params(
+        self, context, next_page_token
+    ):
+        """Get URL parameters."""
+        params = {}
+        if next_page_token:
+            params["offset"] = next_page_token
+        return params
+    
+    def make_request(self, context, next_page_token):
+        prepared_request = self.prepare_request(
+            context, next_page_token=next_page_token
+        )
+        resp = self._request(prepared_request, context)
+        return resp
+    
+    def request_records(self, context: Optional[dict]):
+        next_page_token: Any = None
+        finished = False
+        decorated_request = self.request_decorator(self.make_request)
 
-        if self.__user_agent:
-            kwargs['headers']['User-Agent'] = self.__user_agent
-
-        if s3:
-            kwargs['stream'] = True
-
-        with metrics.http_request_timer(endpoint) as timer:
-            LOGGER.info("Executing %s request to %s with params: %s", method, url, kwargs.get('params'))
-            response = self.__session.request(method, url, **kwargs)
-            if not s3 and response.json().get("error"):
-                LOGGER.error("Error in response: %s", response.json().get("error"))
-                raise Exception(response.json().get("error"))
-            timer.tags[metrics.Tag.http_status_code] = response.status_code
-
-        if response.status_code >= 500:
-            raise Server5xxError()
-
-        if response.status_code == 429:
-            raise ClientRateLimitError()
-
-        response.raise_for_status()
-
-        if s3:
-            return response
-
-        return response.json()
-
-    def get(self, path, **kwargs):
-        return self.request('GET', path=path, **kwargs)
-
-    def post(self, path, **kwargs):
-        return self.request('POST', path=path, **kwargs)
+        while not finished:
+            resp = decorated_request(context, next_page_token)
+            for row in self.parse_response(resp):
+                yield row
+            previous_token = copy.deepcopy(next_page_token)
+            next_page_token = self.get_next_page_token(
+                response=resp, previous_token=previous_token
+            )
+            if next_page_token and next_page_token == previous_token:
+                raise RuntimeError(
+                    f"Loop detected in pagination. "
+                    f"Pagination token {next_page_token} is identical to prior token."
+                )
+            # Cycle until get_next_page_token() no longer returns a value
+            finished = not next_page_token
+    
