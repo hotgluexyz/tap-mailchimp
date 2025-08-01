@@ -283,10 +283,14 @@ def stream_email_activity(client, catalog, state, archive_url):
             file = tar.next()
             while file:
                 if file.isfile():
-                    rawoperations = tar.extractfile(file)
-                    operations = json.loads(rawoperations.read().decode('utf-8'))
+                    try:
+                        rawoperations = tar.extractfile(file)
+                        operations = json.loads(rawoperations.read().decode('utf-8'))
+                    except tarfile.ReadError:
+                        failed_campaign_ids.append(campaign_id)
                     for i, operation in enumerate(operations):
-                        campaign_id = operation['operation_id']
+                        # get only campaign id
+                        campaign_id = operation['operation_id'].split("-")[0]
                         last_bookmark = state.get('bookmarks', {}).get(stream_name, {}).get(campaign_id)
                         LOGGER.info("reports_email_activity - [batch operation %s] Processing records for campaign %s", i, campaign_id)
                         if operation['status_code'] != 200:
@@ -300,9 +304,17 @@ def stream_email_activity(client, catalog, state, archive_url):
                                 transform_activities(email_activities),
                                 bookmark_field='timestamp',
                                 max_bookmark_field=last_bookmark)
+                            
+                            # if the campaign_id exists in state, compare rep_key value and write the highest value
+                            old_bookmark = get_bookmark(state, ['reports_email_activity', campaign_id], None)
+                            if not old_bookmark:
+                                new_bookmark = max_bookmark_field
+                            else:
+                                new_bookmark = old_bookmark if old_bookmark > max_bookmark_field else max_bookmark_field
+
                             write_bookmark(state,
                                            [stream_name, campaign_id],
-                                           max_bookmark_field)
+                                           new_bookmark)
                 file = tar.next()
     return failed_campaign_ids
 
@@ -487,10 +499,14 @@ def sync(client, catalog, state, start_date):
                 'list_segments': {
                     'path': '/lists/{}/segments',
                     'data_path': 'segments',
+                    'bookmark_query_field': 'since_updated_at',
+                    'bookmark_field': 'updated_at',
                     'children': {
                         'list_segment_members': {
                             'path': '/lists/{}/segments/{}/members',
-                            'data_path': 'members'
+                            'data_path': 'members',
+                            'bookmark_query_field': 'since_updated_at',
+                            'bookmark_field': 'last_changed'
                         }
                     }
                 }
@@ -514,7 +530,9 @@ def sync(client, catalog, state, start_date):
             }
         },
         'automations': {
-            'path': '/automations'
+            'path': '/automations',
+            'bookmark_query_field': 'since_create_time',
+            'bookmark_field': 'create_time'
         }
     }
 
