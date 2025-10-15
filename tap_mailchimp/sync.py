@@ -394,7 +394,6 @@ def sync_email_activity(client, catalog, state, start_date, campaign_ids, batch_
             },
             endpoint='create_actvity_export')
 
-        # batch_id = "5fxpaaykw9"
         batch_id = data['id']
 
         LOGGER.info('reports_email_activity - Job running: %s', batch_id)
