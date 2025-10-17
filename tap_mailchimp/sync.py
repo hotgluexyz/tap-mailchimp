@@ -20,7 +20,10 @@ MAX_RETRY_ELAPSED_TIME = 43200 # 12 hours
 EMAIL_ACTIVITY_BATCH_SIZE = 100
 
 # Parallel processing configuration
-MAX_WORKERS = 3  # Number of parallel workers for independent streams
+# MAX_WORKERS controls parallelism for:
+# 1. Independent top-level streams (e.g., automations)
+# 2. Child streams across parent IDs (e.g., list_members for different lists)
+MAX_WORKERS = 3
 
 # Thread-safe state management
 state_lock = threading.Lock()
@@ -217,6 +220,58 @@ def get_dependants(endpoint_config):
         dependants += get_dependants(child_endpoint_config)
     return dependants
 
+def sync_children_parallel(client,
+                          catalog,
+                          state,
+                          start_date,
+                          streams_to_sync,
+                          id_bag,
+                          parent_ids,
+                          children,
+                          bookmark_path,
+                          id_path):
+    """Sync child streams in parallel across parent IDs"""
+    def sync_child_for_parent(child_stream_name, child_endpoint_config, parent_id):
+        """Sync a single child stream for a single parent ID"""
+        return sync_stream(client,
+                          catalog,
+                          state,
+                          start_date,
+                          streams_to_sync,
+                          id_bag,
+                          child_stream_name,
+                          child_endpoint_config,
+                          bookmark_path=bookmark_path + [parent_id, child_stream_name],
+                          id_path=id_path + [parent_id],
+                          parallel=True)
+    
+    total_tasks = len(children) * len(parent_ids)
+    LOGGER.info("Syncing %d child streams across %d parent IDs (%d total tasks) with %d workers",
+                len(children), len(parent_ids), total_tasks, MAX_WORKERS)
+    
+    # Create tasks for all (child_stream, parent_id) combinations
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = []
+        for child_stream_name, child_endpoint_config in children.items():
+            for parent_id in parent_ids:
+                future = executor.submit(sync_child_for_parent, 
+                                       child_stream_name, 
+                                       child_endpoint_config, 
+                                       parent_id)
+                futures.append((future, child_stream_name, parent_id))
+        
+        # Wait for all child syncs to complete
+        completed = 0
+        for future, child_stream_name, parent_id in futures:
+            try:
+                future.result()
+                completed += 1
+                if completed % 10 == 0 or completed == total_tasks:
+                    LOGGER.info("Parallel sync progress: %d/%d tasks completed", completed, total_tasks)
+            except Exception as e:
+                LOGGER.error(f"Error syncing {child_stream_name} for parent ID {parent_id}: {e}")
+                raise
+
 def sync_stream(client,
                 catalog,
                 state,
@@ -226,7 +281,8 @@ def sync_stream(client,
                 stream_name,
                 endpoint_config,
                 bookmark_path=None,
-                id_path=None):
+                id_path=None,
+                parallel=False):
     if not bookmark_path:
         bookmark_path = [stream_name]
     if not id_path:
@@ -256,18 +312,31 @@ def sync_stream(client,
 
         children = endpoint_config.get('children')
         if children:
-            for child_stream_name, child_endpoint_config in children.items():
-                for _id in stream_ids:
-                    sync_stream(client,
-                                catalog,
-                                state,
-                                start_date,
-                                streams_to_sync,
-                                id_bag,
-                                child_stream_name,
-                                child_endpoint_config,
-                                bookmark_path=bookmark_path + [_id, child_stream_name],
-                                id_path=id_path + [_id])
+            if parallel:
+                sync_children_parallel(client,
+                                     catalog,
+                                     state,
+                                     start_date,
+                                     streams_to_sync,
+                                     id_bag,
+                                     stream_ids,
+                                     children,
+                                     bookmark_path,
+                                     id_path)
+            else:
+                for child_stream_name, child_endpoint_config in children.items():
+                    for _id in stream_ids:
+                        sync_stream(client,
+                                    catalog,
+                                    state,
+                                    start_date,
+                                    streams_to_sync,
+                                    id_bag,
+                                    child_stream_name,
+                                    child_endpoint_config,
+                                    bookmark_path=bookmark_path + [_id, child_stream_name],
+                                    id_path=id_path + [_id],
+                                    parallel=parallel)
 
 def get_batch_info(client, batch_id):
     try:
@@ -566,7 +635,7 @@ def sync_parallel(client, catalog, state, start_date):
                 LOGGER.error(f"Error in independent stream processing: {e}")
                 raise
 
-    # Process dependent streams sequentially (they depend on independent streams)
+    # Process dependent streams with parallel child processing
     for stream_name, endpoint_config in dependent_streams:
         sync_stream(client,
                    catalog,
@@ -575,7 +644,8 @@ def sync_parallel(client, catalog, state, start_date):
                    streams_to_sync,
                    id_bag,
                    stream_name,
-                   endpoint_config)
+                   endpoint_config,
+                   parallel=True)
 
     should_stream, _ = should_sync_stream(streams_to_sync,
                                           [],
