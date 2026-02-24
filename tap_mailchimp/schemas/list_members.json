@@ -43,6 +43,13 @@
         "string"
       ]
     },
+    "merge_fields": {
+      "type": [
+        "object",
+        "string",
+        "null"
+      ]
+    },
     "stats": {
       "type": [
         "null",
