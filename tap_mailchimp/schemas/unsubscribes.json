@@ -14,13 +14,6 @@
         "string"
       ]
     },
-    "merge_fields": {
-      "type": [
-        "object",
-        "string",
-        "null"
-      ]
-    },
     "vip": {
       "type": [
         "null",
