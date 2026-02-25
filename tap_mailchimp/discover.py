@@ -44,7 +44,7 @@ def discover(client):
 
     for stream_name, schema_dict in schemas.items():
         # add merge fields for lists streams
-        if stream_name in ["list_members", "list_segment_members"]:
+        if stream_name in ["list_members", "list_segment_members", "unsubscribes"]:
             for merge_field in merge_fields:
                 schema_dict["properties"].update(
                     {merge_field: get_type(merge_fields[merge_field])}
