@@ -2,6 +2,8 @@ import json
 import time
 import random
 import tarfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
 import singer
 from singer import metrics, metadata, Transformer
@@ -17,8 +19,65 @@ MAX_RETRY_ELAPSED_TIME = 43200 # 12 hours
 # Break up reports_email_activity batches to iterate over chunks
 EMAIL_ACTIVITY_BATCH_SIZE = 100
 
+# Parallel processing configuration
+# MAX_WORKERS controls parallelism for:
+# 1. Independent top-level streams (e.g., automations)
+# 2. Child streams across parent IDs (e.g., list_members for different lists)
+MAX_WORKERS = 3
+
+# Thread-safe state management
+state_lock = threading.Lock()
+
 class BatchExpiredError(Exception):
     pass
+
+endpoints = {
+    'lists': {
+        'path': '/lists',
+        'params': {
+            'sort_field': 'date_created',
+            'sort_dir': 'ASC'
+        },
+        'children': {
+            'list_members': {
+                'path': '/lists/{}/members',
+                'data_path': 'members',
+                'bookmark_query_field': 'since_last_changed',
+                'bookmark_field': 'last_changed'
+            },
+            'list_segments': {
+                'path': '/lists/{}/segments',
+                'data_path': 'segments',
+                'children': {
+                    'list_segment_members': {
+                        'path': '/lists/{}/segments/{}/members',
+                        'data_path': 'members'
+                    }
+                }
+            }
+        }
+    },
+    'campaigns': {
+        'dependants': [
+            'reports_email_activity'
+        ],
+        'path': '/campaigns',
+        'params': {
+            'status': 'sent',
+            'sort_field': 'send_time',
+            'sort_dir': 'ASC'
+        },
+        'store_ids': True,
+        'children': {
+            'unsubscribes': {
+                'path': '/reports/{}/unsubscribed'
+            }
+        }
+    },
+    'automations': {
+        'path': '/automations'
+    }
+}
 
 def next_sleep_interval(previous_sleep_interval):
     min_interval = previous_sleep_interval or MIN_RETRY_INTERVAL
@@ -68,8 +127,10 @@ def nested_set(dic, path, value):
     dic[path[-1]] = value
 
 def write_bookmark(state, path, value):
-    nested_set(state, ['bookmarks'] + path, value)
-    singer.write_state(state)
+    with state_lock:
+        nested_set(state, ['bookmarks'] + path, value)
+        singer.write_state(state)
+
 
 def sync_endpoint(client,
                   catalog,
@@ -159,6 +220,58 @@ def get_dependants(endpoint_config):
         dependants += get_dependants(child_endpoint_config)
     return dependants
 
+def sync_children_parallel(client,
+                          catalog,
+                          state,
+                          start_date,
+                          streams_to_sync,
+                          id_bag,
+                          parent_ids,
+                          children,
+                          bookmark_path,
+                          id_path):
+    """Sync child streams in parallel across parent IDs"""
+    def sync_child_for_parent(child_stream_name, child_endpoint_config, parent_id):
+        """Sync a single child stream for a single parent ID"""
+        return sync_stream(client,
+                          catalog,
+                          state,
+                          start_date,
+                          streams_to_sync,
+                          id_bag,
+                          child_stream_name,
+                          child_endpoint_config,
+                          bookmark_path=bookmark_path + [parent_id, child_stream_name],
+                          id_path=id_path + [parent_id],
+                          parallel=True)
+    
+    total_tasks = len(children) * len(parent_ids)
+    LOGGER.info("Syncing %d child streams across %d parent IDs (%d total tasks) with %d workers",
+                len(children), len(parent_ids), total_tasks, MAX_WORKERS)
+    
+    # Create tasks for all (child_stream, parent_id) combinations
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = []
+        for child_stream_name, child_endpoint_config in children.items():
+            for parent_id in parent_ids:
+                future = executor.submit(sync_child_for_parent, 
+                                       child_stream_name, 
+                                       child_endpoint_config, 
+                                       parent_id)
+                futures.append((future, child_stream_name, parent_id))
+        
+        # Wait for all child syncs to complete
+        completed = 0
+        for future, child_stream_name, parent_id in futures:
+            try:
+                future.result()
+                completed += 1
+                if completed % 10 == 0 or completed == total_tasks:
+                    LOGGER.info("Parallel sync progress: %d/%d tasks completed", completed, total_tasks)
+            except Exception as e:
+                LOGGER.error(f"Error syncing {child_stream_name} for parent ID {parent_id}: {e}")
+                raise
+
 def sync_stream(client,
                 catalog,
                 state,
@@ -168,7 +281,8 @@ def sync_stream(client,
                 stream_name,
                 endpoint_config,
                 bookmark_path=None,
-                id_path=None):
+                id_path=None,
+                parallel=False):
     if not bookmark_path:
         bookmark_path = [stream_name]
     if not id_path:
@@ -198,18 +312,31 @@ def sync_stream(client,
 
         children = endpoint_config.get('children')
         if children:
-            for child_stream_name, child_endpoint_config in children.items():
-                for _id in stream_ids:
-                    sync_stream(client,
-                                catalog,
-                                state,
-                                start_date,
-                                streams_to_sync,
-                                id_bag,
-                                child_stream_name,
-                                child_endpoint_config,
-                                bookmark_path=bookmark_path + [_id, child_stream_name],
-                                id_path=id_path + [_id])
+            if parallel:
+                sync_children_parallel(client,
+                                     catalog,
+                                     state,
+                                     start_date,
+                                     streams_to_sync,
+                                     id_bag,
+                                     stream_ids,
+                                     children,
+                                     bookmark_path,
+                                     id_path)
+            else:
+                for child_stream_name, child_endpoint_config in children.items():
+                    for _id in stream_ids:
+                        sync_stream(client,
+                                    catalog,
+                                    state,
+                                    start_date,
+                                    streams_to_sync,
+                                    id_bag,
+                                    child_stream_name,
+                                    child_endpoint_config,
+                                    bookmark_path=bookmark_path + [_id, child_stream_name],
+                                    id_path=id_path + [_id],
+                                    parallel=parallel)
 
 def get_batch_info(client, batch_id):
     try:
@@ -459,7 +586,8 @@ def check_and_resume_email_activity_batch(client, catalog, state, start_date):
 
 ## TODO: is current_stream being updated?
 
-def sync(client, catalog, state, start_date):
+def sync_parallel(client, catalog, state, start_date):
+    """Parallel version of sync that processes independent streams concurrently"""
     streams_to_sync = {
         'selected_streams': get_selected_streams(catalog),
         'last_stream': state.get('current_stream')
@@ -470,53 +598,83 @@ def sync(client, catalog, state, start_date):
 
     id_bag = {}
 
-    endpoints = {
-        'lists': {
-            'path': '/lists',
-            'params': {
-                'sort_field': 'date_created',
-                'sort_dir': 'ASC'
-            },
-            'children': {
-                'list_members': {
-                    'path': '/lists/{}/members',
-                    'data_path': 'members',
-                    'bookmark_query_field': 'since_last_changed',
-                    'bookmark_field': 'last_changed'
-                },
-                'list_segments': {
-                    'path': '/lists/{}/segments',
-                    'data_path': 'segments',
-                    'children': {
-                        'list_segment_members': {
-                            'path': '/lists/{}/segments/{}/members',
-                            'data_path': 'members'
-                        }
-                    }
-                }
-            }
-        },
-        'campaigns': {
-            'dependants': [
-                'reports_email_activity'
-            ],
-            'path': '/campaigns',
-            'params': {
-                'status': 'sent',
-                'sort_field': 'send_time',
-                'sort_dir': 'ASC'
-            },
-            'store_ids': True,
-            'children': {
-                'unsubscribes': {
-                    'path': '/reports/{}/unsubscribed'
-                }
-            }
-        },
-        'automations': {
-            'path': '/automations'
-        }
+    # Process independent streams in parallel
+    def sync_independent_stream(stream_name, endpoint_config):
+        return sync_stream(client,
+                          catalog,
+                          state,
+                          start_date,
+                          streams_to_sync,
+                          id_bag,
+                          stream_name,
+                          endpoint_config)
+
+    # Identify independent streams (those without dependencies)
+    independent_streams = []
+    dependent_streams = []
+    
+    for stream_name, endpoint_config in endpoints.items():
+        dependants = get_dependants(endpoint_config)
+        if not dependants:
+            independent_streams.append((stream_name, endpoint_config))
+        else:
+            dependent_streams.append((stream_name, endpoint_config))
+
+    # Process independent streams in parallel
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = []
+        for stream_name, endpoint_config in independent_streams:
+            future = executor.submit(sync_independent_stream, stream_name, endpoint_config)
+            futures.append(future)
+        
+        # Wait for independent streams to complete
+        for future in as_completed(futures):
+            try:
+                future.result()
+            except Exception as e:
+                LOGGER.error(f"Error in independent stream processing: {e}")
+                raise
+
+    # Process dependent streams with parallel child processing
+    for stream_name, endpoint_config in dependent_streams:
+        sync_stream(client,
+                   catalog,
+                   state,
+                   start_date,
+                   streams_to_sync,
+                   id_bag,
+                   stream_name,
+                   endpoint_config,
+                   parallel=True)
+
+    should_stream, _ = should_sync_stream(streams_to_sync,
+                                          [],
+                                          'reports_email_activity')
+    campaign_ids = id_bag.get('campaigns')
+    if should_stream and campaign_ids:
+        # Resume previous batch, if necessary
+        check_and_resume_email_activity_batch(client, catalog, state, start_date)
+        # Chunk batch_ids, bookmarking the chunk number
+        sorted_campaigns = sorted(campaign_ids)
+        next_chunk = get_bookmark(state, ['reports_email_activity_next_chunk'], 0) or 0
+        chunk_bookmark = int(next_chunk)
+        for i, campaign_chunk in enumerate(chunk_campaigns(sorted_campaigns, chunk_bookmark)):
+            write_email_activity_chunk_bookmark(state, chunk_bookmark, i, sorted_campaigns)
+            sync_email_activity(client, catalog, state, start_date, campaign_chunk)
+
+        # Start from the beginning next time
+        write_bookmark(state, ['reports_email_activity_next_chunk'], 0)
+
+def sync(client, catalog, state, start_date):
+    streams_to_sync = {
+        'selected_streams': get_selected_streams(catalog),
+        'last_stream': state.get('current_stream')
     }
+
+    if not streams_to_sync['selected_streams']:
+        return
+
+    id_bag = {}
 
     for stream_name, endpoint_config in endpoints.items():
         sync_stream(client,
