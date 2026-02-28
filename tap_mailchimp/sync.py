@@ -245,6 +245,11 @@ def poll_email_activity(client, state, batch_id):
                     data['status'],
                     progress)
 
+        LOGGER.info('reports_email_activity - Operations: total_operations: %s, finished_operations: %s, errored_operations: %s',
+                data['total_operations'],
+                data['finished_operations'],
+                data['errored_operations'])
+
         if data['status'] == 'finished':
             return data
         elif (time.time() - start_time) > MAX_RETRY_ELAPSED_TIME:
