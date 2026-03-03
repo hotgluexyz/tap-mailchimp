@@ -279,18 +279,18 @@ def stream_email_activity(client, catalog, state, archive_url, campaign_send_tim
                 record_template = dict(record)
                 del record_template['activity']
 
+                # append sent activity
+                sent_activity = {
+                    'action': 'sent',
+                    'type': '',
+                    'timestamp': campaign_send_time
+                }
+                record['activity'].append(sent_activity)
+
                 for activity in record['activity']:
                     new_activity = dict(record_template)
                     for key, value in activity.items():
                         new_activity[key] = value
-                    yield new_activity
-                
-                if not record['activity']:
-                    new_activity = dict(record_template)
-                    new_activity['action'] = 'sent'
-                    new_activity['type'] = ''
-                    # use campaign send_time when no activity (sent but not opened/clicked/bounced)
-                    new_activity['timestamp'] = campaign_send_time or record.get('send_time')
                     yield new_activity
 
     write_schema(catalog, stream_name)
