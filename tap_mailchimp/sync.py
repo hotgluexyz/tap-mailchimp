@@ -86,12 +86,15 @@ def sync_endpoint(client,
     bookmark_path = bookmark_path + ['datetime']
     last_datetime = get_bookmark(state, bookmark_path, start_date)
     ids = []
+    campaign_send_times = {} if stream_name == 'campaigns' else None
     max_bookmark_field = last_datetime
 
     def transform(record):
         _id = record.get('id')
         if _id:
             ids.append(_id)
+            if campaign_send_times is not None and record.get('send_time'):
+                campaign_send_times[_id] = record['send_time']
         merge_fields = record.get('merge_fields')
         if merge_fields:
             for key, value in merge_fields.items():
@@ -150,6 +153,8 @@ def sync_endpoint(client,
 
         offset += page_size
 
+    if campaign_send_times:
+        return ids, campaign_send_times
     return ids
 
 def get_dependants(endpoint_config):
@@ -180,18 +185,22 @@ def sync_stream(client,
                                                        stream_name)
     if should_stream:
         path = endpoint_config.get('path').format(*id_path)
-        stream_ids = sync_endpoint(client,
-                                   catalog,
-                                   state,
-                                   start_date,
-                                   stream_name,
-                                   should_persist,
-                                   path,
-                                   endpoint_config.get('data_path', stream_name),
-                                   endpoint_config.get('params', {}),
-                                   bookmark_path,
-                                   endpoint_config.get('bookmark_query_field'),
-                                   endpoint_config.get('bookmark_field'))
+        result = sync_endpoint(client,
+                              catalog,
+                              state,
+                              start_date,
+                              stream_name,
+                              should_persist,
+                              path,
+                              endpoint_config.get('data_path', stream_name),
+                              endpoint_config.get('params', {}),
+                              bookmark_path,
+                              endpoint_config.get('bookmark_query_field'),
+                              endpoint_config.get('bookmark_field'))
+        if isinstance(result, tuple):
+            stream_ids, id_bag['campaign_send_times'] = result[0], result[1]
+        else:
+            stream_ids = result
 
         if endpoint_config.get('store_ids'):
             id_bag[stream_name] = stream_ids
@@ -258,16 +267,25 @@ def poll_email_activity(client, state, batch_id):
                     sleep)
         time.sleep(sleep)
 
-def stream_email_activity(client, catalog, state, archive_url):
+def stream_email_activity(client, catalog, state, archive_url, campaign_send_times=None):
     stream_name = 'reports_email_activity'
+    campaign_send_times = campaign_send_times or {}
 
-    def transform_activities(records):
+    def transform_activities(records, campaign_send_time=None):
         for record in records:
             if 'activity' in record:
                 if '_links' in record:
                     del record['_links']
                 record_template = dict(record)
                 del record_template['activity']
+
+                # append sent activity
+                sent_activity = {
+                    'action': 'sent',
+                    'type': '',
+                    'timestamp': campaign_send_time
+                }
+                record['activity'].append(sent_activity)
 
                 for activity in record['activity']:
                     new_activity = dict(record_template)
@@ -294,10 +312,11 @@ def stream_email_activity(client, catalog, state, archive_url):
                         else:
                             response = json.loads(operation['response'])
                             email_activities = response['emails']
+                            campaign_send_time = campaign_send_times.get(campaign_id)
                             max_bookmark_field = process_records(
                                 catalog,
                                 stream_name,
-                                transform_activities(email_activities),
+                                transform_activities(email_activities, campaign_send_time),
                                 bookmark_field='timestamp',
                                 max_bookmark_field=last_bookmark)
                             write_bookmark(state,
@@ -306,7 +325,7 @@ def stream_email_activity(client, catalog, state, archive_url):
                 file = tar.next()
     return failed_campaign_ids
 
-def sync_email_activity(client, catalog, state, start_date, campaign_ids, batch_id=None):
+def sync_email_activity(client, catalog, state, start_date, campaign_ids, campaign_send_times=None, batch_id=None):
     if batch_id:
         LOGGER.info('reports_email_activity - Picking up previous run: %s', batch_id)
     else:
@@ -350,7 +369,8 @@ def sync_email_activity(client, catalog, state, start_date, campaign_ids, batch_
     failed_campaign_ids = stream_email_activity(client,
                                                 catalog,
                                                 state,
-                                                data['response_body_url'])
+                                                data['response_body_url'],
+                                                campaign_send_times or {})
     if failed_campaign_ids:
         LOGGER.warning("reports_email_activity - operations failed for campaign_ids: %s", failed_campaign_ids)
 
@@ -455,7 +475,7 @@ def check_and_resume_email_activity_batch(client, catalog, state, start_date):
 
         # Resume from bookmarked job_id, then if completed, issue a new batch for processing.
         campaigns = [] # Don't need a list of campaigns if resuming
-        sync_email_activity(client, catalog, state, start_date, campaigns, batch_id)
+        sync_email_activity(client, catalog, state, start_date, campaigns, campaign_send_times={}, batch_id=batch_id)
 
 ## TODO: is current_stream being updated?
 
@@ -541,7 +561,7 @@ def sync(client, catalog, state, start_date):
         chunk_bookmark = int(next_chunk)
         for i, campaign_chunk in enumerate(chunk_campaigns(sorted_campaigns, chunk_bookmark)):
             write_email_activity_chunk_bookmark(state, chunk_bookmark, i, sorted_campaigns)
-            sync_email_activity(client, catalog, state, start_date, campaign_chunk)
+            sync_email_activity(client, catalog, state, start_date, campaign_chunk, id_bag.get('campaign_send_times', {}))
 
         # Start from the beginning next time
         write_bookmark(state, ['reports_email_activity_next_chunk'], 0)
