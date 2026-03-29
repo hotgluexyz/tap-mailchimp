@@ -204,6 +204,13 @@
         ]
       }
     },
+    "campaign_last_sent": {
+      "type": [
+        "null",
+        "string"
+      ],
+      "format": "date-time"
+    },
     "stats": {
       "type": [
         "null",
