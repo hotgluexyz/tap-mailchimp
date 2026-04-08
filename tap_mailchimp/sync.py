@@ -43,8 +43,7 @@ def process_records(catalog,
         for record in records:
             if bookmark_field:
                 if max_bookmark_field is None or \
-                   (record[bookmark_field] is not None and \
-                   record[bookmark_field] > max_bookmark_field):
+                    record[bookmark_field] > max_bookmark_field:
                     max_bookmark_field = record[bookmark_field]
             if persist:
                 record = transformer.transform(record,
