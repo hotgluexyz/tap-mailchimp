@@ -310,11 +310,8 @@ def stream_email_activity(client, catalog, state, archive_url, campaign_send_tim
                             response = json.loads(raw_response) if isinstance(raw_response, str) else raw_response
                         except json.JSONDecodeError:
                             response = {}
-                        email_activities = response.get("emails") or []
-                        if email_activities and isinstance(email_activities[0], dict):
-                            campaign_id = email_activities[0].get("campaign_id")
-                        else:
-                            campaign_id = operation.get("operation_id","").rsplit("-", 1)[0]
+                        email_activities = response.get("emails") or [{}] 
+                        campaign_id = email_activities[0].get("campaign_id")
                         last_bookmark = state.get('bookmarks', {}).get(stream_name, {}).get(campaign_id)
                         LOGGER.info("reports_email_activity - [batch operation %s] Processing records for campaign %s", i, campaign_id)
                         if operation['status_code'] != 200:
