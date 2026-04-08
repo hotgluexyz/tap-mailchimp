@@ -305,7 +305,16 @@ def stream_email_activity(client, catalog, state, archive_url, campaign_send_tim
                     rawoperations = tar.extractfile(file)
                     operations = json.loads(rawoperations.read().decode('utf-8'))
                     for i, operation in enumerate(operations):
-                        campaign_id = operation['operation_id']
+                        raw_response = operation.get("response", "{}")
+                        try:
+                            parsed_response = json.loads(raw_response) if isinstance(raw_response, str) else raw_response
+                        except json.JSONDecodeError:
+                            parsed_response = {}
+                        emails = parsed_response.get("emails") or []
+                        if emails and isinstance(emails[0], dict):
+                            campaign_id = emails[0].get("campaign_id")
+                        else:
+                            campaign_id = operation.get("operation_id").rsplit("-", 1)[0]
                         last_bookmark = state.get('bookmarks', {}).get(stream_name, {}).get(campaign_id)
                         LOGGER.info("reports_email_activity - [batch operation %s] Processing records for campaign %s", i, campaign_id)
                         if operation['status_code'] != 200:
