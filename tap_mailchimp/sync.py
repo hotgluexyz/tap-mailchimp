@@ -307,12 +307,12 @@ def stream_email_activity(client, catalog, state, archive_url, campaign_send_tim
                     for i, operation in enumerate(operations):
                         raw_response = operation.get("response", "{}")
                         try:
-                            parsed_response = json.loads(raw_response) if isinstance(raw_response, str) else raw_response
+                            response = json.loads(raw_response) if isinstance(raw_response, str) else raw_response
                         except json.JSONDecodeError:
-                            parsed_response = {}
-                        emails = parsed_response.get("emails") or []
-                        if emails and isinstance(emails[0], dict):
-                            campaign_id = emails[0].get("campaign_id")
+                            response = {}
+                        email_activities = response.get("emails") or []
+                        if email_activities and isinstance(email_activities[0], dict):
+                            campaign_id = email_activities[0].get("campaign_id")
                         else:
                             campaign_id = operation.get("operation_id","").rsplit("-", 1)[0]
                         last_bookmark = state.get('bookmarks', {}).get(stream_name, {}).get(campaign_id)
@@ -320,8 +320,6 @@ def stream_email_activity(client, catalog, state, archive_url, campaign_send_tim
                         if operation['status_code'] != 200:
                             failed_campaign_ids.append(campaign_id)
                         else:
-                            response = json.loads(operation['response'])
-                            email_activities = response['emails']
                             campaign_send_time = campaign_send_times.get(campaign_id)
                             max_bookmark_field = process_records(
                                 catalog,
