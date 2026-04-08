@@ -314,7 +314,7 @@ def stream_email_activity(client, catalog, state, archive_url, campaign_send_tim
                         if emails and isinstance(emails[0], dict):
                             campaign_id = emails[0].get("campaign_id")
                         else:
-                            campaign_id = operation.get("operation_id").rsplit("-", 1)[0]
+                            campaign_id = operation.get("operation_id","").rsplit("-", 1)[0]
                         last_bookmark = state.get('bookmarks', {}).get(stream_name, {}).get(campaign_id)
                         LOGGER.info("reports_email_activity - [batch operation %s] Processing records for campaign %s", i, campaign_id)
                         if operation['status_code'] != 200:
