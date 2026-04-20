@@ -9,7 +9,7 @@ from singer import metadata
 
 from tap_mailchimp.client import MailchimpClient
 from tap_mailchimp.discover import discover
-from tap_mailchimp.sync import sync
+from tap_mailchimp.sync import sync, sync_parallel
 
 LOGGER = singer.get_logger()
 
@@ -37,10 +37,19 @@ def main():
         if parsed_args.discover:
             do_discover(client)
         elif parsed_args.catalog:
-            sync(client,
-                 parsed_args.catalog,
-                 parsed_args.state,
-                 parsed_args.config['start_date'])
+            # Use parallel sync if enabled in config
+            use_parallel = parsed_args.config.get('use_parallel', False)
+            if use_parallel:
+                LOGGER.info('Using parallel sync mode')
+                sync_parallel(client,
+                             parsed_args.catalog,
+                             parsed_args.state,
+                             parsed_args.config['start_date'])
+            else:
+                sync(client,
+                     parsed_args.catalog,
+                     parsed_args.state,
+                     parsed_args.config['start_date'])
 
 if __name__ == '__main__':
     main()
