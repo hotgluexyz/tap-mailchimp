@@ -279,7 +279,7 @@ def stream_email_activity(client, catalog, state, archive_url, campaign_send_tim
                 record_template = dict(record)
                 del record_template['activity']
 
-                # append sent activity only if the campaign_send_time is greater than the rep key
+                #append sent_activity only if the campaing_id is not present on the reports_email_activity state bookmark
                 if not replication_key_value:
                     sent_activity = {
                         'action': 'sent',
