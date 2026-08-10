@@ -509,6 +509,15 @@ def sync(client, catalog, state, start_date):
                     'bookmark_query_field': 'since_last_changed',
                     'bookmark_field': 'last_changed'
                 },
+                'list_member_archived': {
+                    'path': '/lists/{}/members',
+                    'data_path': 'members',
+                    'params': {
+                        'status': 'archived'
+                    },
+                    'bookmark_query_field': 'since_last_changed',
+                    'bookmark_field': 'last_changed'
+                },
                 'list_segments': {
                     'path': '/lists/{}/segments',
                     'data_path': 'segments',

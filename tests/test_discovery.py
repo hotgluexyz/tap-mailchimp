@@ -37,7 +37,8 @@ class TestMailchimpDiscovery(unittest.TestCase):
             'reports_email_activity': {'campaign_id', 'action', 'email_id', 'timestamp'},
             'unsubscribes': {'campaign_id', 'email_id'},
             'automations': {'id'},
-            'list_members': {'id', 'list_id', 'last_changed'}
+            'list_members': {'id', 'list_id', 'last_changed'},
+            'list_member_archived': {'id', 'list_id', 'last_changed'},
         }
 
     def tap_name(self):

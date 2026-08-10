@@ -1,3 +1,4 @@
+import copy
 import os
 import json
 
@@ -8,6 +9,7 @@ PKS = {
     'automations': ['id'],
     'campaigns': ['id'],
     'list_members': ['id', 'list_id'],
+    'list_member_archived': ['id', 'list_id'],
     'list_segment_members': ['id'],
     'list_segments': ['id'],
     'lists': ['id'],
@@ -22,6 +24,7 @@ PKS = {
 
 REPLICATION_KEYS = {
     'list_members': ['last_changed'],
+    'list_member_archived': ['last_changed'],
 }
 
 def get_abs_path(path):
@@ -65,5 +68,9 @@ def get_schemas():
                 'breadcrumb': ['properties', prop]
             })
         FIELD_METADATA[stream_name] = metadata
+
+    # Same payload as list_members; Mailchimp only returns these with status=archived.
+    SCHEMAS['list_member_archived'] = copy.deepcopy(SCHEMAS['list_members'])
+    FIELD_METADATA['list_member_archived'] = copy.deepcopy(FIELD_METADATA['list_members'])
 
     return SCHEMAS, FIELD_METADATA
