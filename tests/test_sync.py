@@ -33,6 +33,7 @@ class MailchimpBookmarks(unittest.TestCase):
             'automations',
             'campaigns',
             'list_members',
+            'list_member_archived',
             'list_segment_members',
             'list_segments',
             'lists',
